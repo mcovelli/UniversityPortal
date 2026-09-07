@@ -12,8 +12,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
 /* ---------- PROJECT ROOT ---------- */
-/* Adjust if project is in a subfolder (e.g., /SystemsProject) */
-define('PROJECT_ROOT', '/SystemsProject');
+/* Adjust if project is in a subfolder (e.g., /UniversityPortal) */
+define('PROJECT_ROOT', '/UniversityPortal');
 
 /* ---------- DATABASE CONNECTION ---------- */
 /* Replace the values below with your local database credentials */

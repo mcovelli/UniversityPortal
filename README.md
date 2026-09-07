@@ -39,13 +39,13 @@ Open a terminal, navigate to your XAMPP `htdocs` folder, and clone the project:
 **Mac:**
 ```bash
 cd /Applications/XAMPP/htdocs
-git clone https://github.com/mcovelli/SystemsProject
+git clone https://github.com/mcovelli/UniversityPortal
 ```
 
 **Windows:**
 ```bash
 cd C:/xampp/htdocs
-git clone https://github.com/mcovelli/SystemsProject
+git clone https://github.com/mcovelli/UniversityPortal
 ```
 
 ---
@@ -88,7 +88,7 @@ $DB_NAME = 'University';
 Open your browser and go to:
 
 ```
-http://localhost/SystemsProject/login.html
+http://localhost/UniversityPortal/login.html
 ```
 
 ---
@@ -110,7 +110,7 @@ brew services start mysql
 The project doesn't need to live inside a web server's document root — clone it anywhere:
 
 ```bash
-git clone https://github.com/mcovelli/SystemsProject
+git clone https://github.com/mcovelli/UniversityPortal
 ```
 
 ### 2. Set Up the Database
@@ -119,7 +119,7 @@ Import the database with the `mysql` CLI instead of phpMyAdmin:
 
 ```bash
 mysql -u root -p -e "CREATE DATABASE University"
-mysql -u root -p University < SystemsProject/University.sql
+mysql -u root -p University < UniversityPortal/University.sql
 ```
 
 ### 3. Configure the Database Connection
@@ -132,21 +132,21 @@ $DB_USER = getenv('DB_USER') ?: 'root';
 $DB_PASS = getenv('DB_PASS') ?: '';   // your local MySQL root password, if any
 ```
 
-Leave `PROJECT_ROOT` set to `/SystemsProject` — the next step relies on it matching the URL path.
+Leave `PROJECT_ROOT` set to `/UniversityPortal` — the next step relies on it matching the URL path.
 
 ### 4. Start the PHP Built-in Server
 
-Run the server from the **parent directory** of the cloned `SystemsProject` folder (not from inside it), so `/SystemsProject/...` URLs resolve the same way they would under XAMPP's `htdocs`:
+Run the server from the **parent directory** of the cloned `UniversityPortal` folder (not from inside it), so `/UniversityPortal/...` URLs resolve the same way they would under XAMPP's `htdocs`:
 
 ```bash
-cd /path/to/parent-folder-containing-SystemsProject
+cd /path/to/parent-folder-containing-UniversityPortal
 php -S localhost:8000
 ```
 
 ### 5. Access the Website
 
 ```
-http://localhost:8000/SystemsProject/login.html
+http://localhost:8000/UniversityPortal/login.html
 ```
 
 Press `Ctrl+C` in that terminal to stop the server. Re-run the same `php -S localhost:8000` command any time you want to start it again — no need to reinstall or reconfigure anything.
