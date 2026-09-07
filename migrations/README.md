@@ -227,3 +227,98 @@ still succeeds, a negative-seat insert is rejected by the `CHECK` (the
 pre-existing floor trigger only covers `UPDATE`), and a normal seat
 decrement still works. Live database confirmed unchanged (29 triggers,
 41 negative sections) — 013 has not been applied there.
+
+# 014: the 312 students
+
+```bash
+mysql -h 127.0.0.1 -u root University --table < migrations/014_backfill_major_declarations.sql
+```
+
+Writes the `StudentMajor` row the last open item was missing. Splits on
+the one thing that told the 312 apart: 96 have enrolment history, so
+`DateOfDeclaration` is backfilled from their earliest enrolment -- real
+evidence, not a guess. The other 216 have never enrolled in anything and
+nothing in the schema carries a date to anchor them to, so they get
+`CURDATE()` -- the backfill date, documented as exactly that, not a
+claimed memory of the past. Both groups insert through a staging temp
+table rather than straight from `Student`, because a direct
+`INSERT ... SELECT ... FROM Student` fires 011's sync trigger, which
+`UPDATE`s `Student` -- and MySQL refuses to let a trigger update a table
+its invoking statement is still reading (error 1442).
+
+**Verified.** Applied to a clone on 2026-09-07: all 312 land, 0 cache
+disagreements anywhere in the table afterward.
+
+# 015–018: the rest of the trigger review
+
+Group D (derived data), Group E (audit trail), Group F (login), and the
+two items flagged but not built. `config.php` gained a second session
+variable alongside `@nu_override` for this batch:
+
+```php
+if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['user_id'])) {
+    $mysqli->query('SET @nu_actor = ' . (int)$_SESSION['user_id']);
+}
+```
+
+Every logged-in request now tells the database who is making it --
+016's audit triggers write this into `AuditLog.ChangedBy`. Without it
+every row would read `root`, because every page connects as root.
+
+```bash
+mysqldump -h 127.0.0.1 -u root --set-gtid-purged=OFF --single-transaction \
+  --routines --triggers --databases University > University_before_015.sql
+
+mysql -h 127.0.0.1 -u root University --table < migrations/015_degree_audit_refresh.sql
+mysql -h 127.0.0.1 -u root University --table < migrations/016_audit_trail.sql
+mysql -h 127.0.0.1 -u root University --table < migrations/017_login_lockout.sql
+mysql -h 127.0.0.1 -u root University --table < migrations/018_fix_major_name.sql
+```
+
+| File | Adds |
+|---|---|
+| `015` | `trg_SE_after_update_audit` -- calls `UpdateDegreeAudit` when a grade lands, so the stored audit stops depending on the student visiting that one page. Also drops `CreditsEarned` from the four load tables (`FullTimeUG`/`PartTimeUG`/`FullTimeGrad`/`PartTimeGrad`) -- 973 of 982 `FullTimeUG` rows already disagreed with it, nothing in the app reads it, and `DegreeAudit.Credits_Completed` is the same number, correctly. |
+| `016` | Three audit triggers: `Users` (address/email/status/role, old value and new), `StudentEnrollment` (every grade change), `StudentHold` (placed and cleared). Needs `@nu_actor`. |
+| `017` | `trg_Login_before_update_lockout` -- sets `MustReset = 1` once `LoginAttempts` reaches 3, so the lockout holds even if a future write path forgets to set it. `login.php` already does this correctly; this makes it true regardless of which file writes `Login`. |
+| `018` | Renames `Major.MajorName` for `MajorID 1` from "Mathematics Minor" to "Mathematics" -- a copy-paste from `Minor.MinorName`, which already carries that exact name correctly on its own table. |
+
+## UpdateUsers.php and CreateUsers.php also changed
+
+`UpdateUsers.php`'s student block used `REPLACE INTO Undergraduate` /
+`REPLACE INTO Graduate`. `REPLACE` deletes any existing row with that
+primary key before reinserting it, and both tables cascade that delete
+onto their load table (`FullTimeUG`/`PartTimeUG`/`FullTimeGrad`/
+`PartTimeGrad`) -- so saving a student's edit, even one that never
+touched their enrollment type, silently deleted their `MaxCredits`/
+`MinCredits`/`Year` row, and nothing recreated it. Fixed as an upsert
+that only changes the columns being edited: an unchanged type now
+leaves the load row untouched, and an actual type switch removes the
+stale row from the old table and creates a fresh one in the new table
+with sensible defaults, matching what `CreateUsers.php` sets at
+creation.
+
+Nothing had ever been affected on the live database as of this
+migration (0 students missing both a `FullTimeUG`/`PartTimeUG` row and
+both a `FullTimeGrad`/`PartTimeGrad` row) -- this was a live landmine
+that had not yet gone off, not a repair.
+
+`CreateUsers.php` no longer inserts `CreditsEarned` -- the column 015
+drops.
+
+## Verified
+
+Applied to a clone of the live database on 2026-09-07. 39 triggers
+installed (33 + 6), `Major.MajorID 1` reads "Mathematics" afterward.
+Behavioural tests: `UpdateDegreeAudit` fires on a grade change and does
+not fire on a plain drop or a status-only change; `Users`/
+`StudentEnrollment`/`StudentHold` writes land in `AuditLog` with the
+actor and old/new values, a no-op `Users` update logs nothing;
+`LoginAttempts = 3` locks the account even without `MustReset` set
+explicitly, and an explicit unlock (`0`/`0` together) is not clobbered.
+`UpdateUsers.php`'s fix verified through the real page, not just SQL: a
+no-op save of an UpdateAdmin-edited student now leaves `FullTimeUG`
+untouched (previously destroyed), and a real type switch removes the
+old load row and creates the new one. All checks run with zero fatals
+and zero warnings. Live database confirmed unchanged (33 triggers,
+`MajorID 1` still "Mathematics Minor", `CreditsEarned` still present)
+-- none of 014–018 has been applied there.

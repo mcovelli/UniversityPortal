@@ -183,11 +183,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
               // Full/Part Time
               if ($subType2 === 'FullTimeUG') {
-                  $q2 = "INSERT INTO FullTimeUG (StudentID, MaxCredits, MinCredits, Year, CreditsEarned)
-                         VALUES (?, 18, 12, 'Freshman', 0)";
+                  $q2 = "INSERT INTO FullTimeUG (StudentID, MaxCredits, MinCredits, Year)
+                         VALUES (?, 18, 12, 'Freshman')";
               } else {
-                  $q2 = "INSERT INTO PartTimeUG (StudentID, MaxCredits, MinCredits, Year, CreditsEarned)
-                         VALUES (?, 9, 3, 'Freshman', 0)";
+                  $q2 = "INSERT INTO PartTimeUG (StudentID, MaxCredits, MinCredits, Year)
+                         VALUES (?, 9, 3, 'Freshman')";
               }
               $stmt = $mysqli->prepare($q2);
               $stmt->bind_param("i", $userId);
@@ -245,10 +245,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
               // Full/Part Time Grad
               $q2 = ($subType2 === 'FullTimeGrad')
-                  ? "INSERT INTO FullTimeGrad (StudentID, Year, CreditsEarned, ThesisYear)
-                     VALUES (?, 1, 0, NULL)"
-                  : "INSERT INTO PartTimeGrad (StudentID, Year, CreditsEarned, ThesisYear)
-                     VALUES (?, 1, 0, NULL)";
+                  ? "INSERT INTO FullTimeGrad (StudentID, Year, ThesisYear)
+                     VALUES (?, 1, NULL)"
+                  : "INSERT INTO PartTimeGrad (StudentID, Year, ThesisYear)
+                     VALUES (?, 1, NULL)";
               $stmt = $mysqli->prepare($q2);
               $stmt->bind_param("i", $userId);
               $stmt->execute();

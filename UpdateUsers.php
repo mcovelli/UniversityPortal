@@ -208,24 +208,66 @@ if (isset($_POST['updateUser'])) {
             $q->execute();
             $q->close();
 
-            // 3. And the row for the new type can go in.
+            // 3. And the row for the new type can go in. This is an upsert,
+            //    not a REPLACE: REPLACE deletes any existing row with this
+            //    StudentID before reinserting it, and Undergraduate/Graduate
+            //    both cascade that delete onto FullTimeUG/PartTimeUG or
+            //    FullTimeGrad/PartTimeGrad -- so a plain edit to a student
+            //    who wasn't even changing type silently destroyed their load
+            //    row, and nothing here ever recreated it. An upsert changes
+            //    only the columns being edited and never deletes the row, so
+            //    the load row it points to survives.
             if ($_POST['StudentType'] === "Undergraduate") {
 
                 $q = $mysqli->prepare("
-                    REPLACE INTO Undergraduate(StudentID, DeptID, UGStudentType)
+                    INSERT INTO Undergraduate (StudentID, DeptID, UGStudentType)
                     VALUES (?, (SELECT DeptID FROM Major WHERE MajorID=?), ?)
+                    ON DUPLICATE KEY UPDATE DeptID = VALUES(DeptID), UGStudentType = VALUES(UGStudentType)
                 ");
                 $q->bind_param("iis", $uid, $_POST['MajorID'], $_POST['UGStudentType']);
+                $q->execute();
+                $q->close();
+
+                // UGStudentType is a label; FullTimeUG/PartTimeUG is where the
+                // actual credit limits live. Keep the row that matches the
+                // label -- untouched if it already existed -- and drop any row
+                // left over in the other table from before a type switch.
+                [$keepTable, $dropTable] = $_POST['UGStudentType'] === 'FullTimeUG'
+                    ? ['FullTimeUG', 'PartTimeUG'] : ['PartTimeUG', 'FullTimeUG'];
+                [$maxCredits, $minCredits] = $_POST['UGStudentType'] === 'FullTimeUG' ? [18, 12] : [9, 3];
+
+                $mysqli->query("DELETE FROM $dropTable WHERE StudentID = $uid");
+                $q = $mysqli->prepare("
+                    INSERT INTO $keepTable (StudentID, MaxCredits, MinCredits, Year)
+                    VALUES (?, ?, ?, 'Freshman')
+                    ON DUPLICATE KEY UPDATE StudentID = StudentID
+                ");
+                $q->bind_param("iii", $uid, $maxCredits, $minCredits);
                 $q->execute();
                 $q->close();
 
             } else {
 
                 $q = $mysqli->prepare("
-                    REPLACE INTO Graduate(StudentID, DeptID, Year, GradStudentType, ProgramID)
+                    INSERT INTO Graduate (StudentID, DeptID, Year, GradStudentType, ProgramID)
                     VALUES (?, (SELECT DeptID FROM Program WHERE ProgramID=?), 1, ?, ?)
+                    ON DUPLICATE KEY UPDATE DeptID = VALUES(DeptID), GradStudentType = VALUES(GradStudentType), ProgramID = VALUES(ProgramID)
                 ");
                 $q->bind_param("issi", $uid, $_POST['ProgramID'], $_POST['GradStudentType'], $_POST['ProgramID']);
+                $q->execute();
+                $q->close();
+
+                [$keepTable, $dropTable] = $_POST['GradStudentType'] === 'FullTimeGrad'
+                    ? ['FullTimeGrad', 'PartTimeGrad'] : ['PartTimeGrad', 'FullTimeGrad'];
+                [$maxCredits, $minCredits] = $_POST['GradStudentType'] === 'FullTimeGrad' ? [12, 9] : [6, 3];
+
+                $mysqli->query("DELETE FROM $dropTable WHERE StudentID = $uid");
+                $q = $mysqli->prepare("
+                    INSERT INTO $keepTable (StudentID, MaxCredits, MinCredits, Year, ThesisYear)
+                    VALUES (?, ?, ?, 1, NULL)
+                    ON DUPLICATE KEY UPDATE StudentID = StudentID
+                ");
+                $q->bind_param("iii", $uid, $maxCredits, $minCredits);
                 $q->execute();
                 $q->close();
             }

@@ -41,6 +41,13 @@ function get_db(): mysqli {
         $mysqli->query('SET @nu_override = 1');
     }
 
+    /* Migration 016's audit triggers write this into AuditLog.ChangedBy.
+       Without it every row reads 'root', because every page connects as
+       root -- CURRENT_USER() can't see who is logged into the app. */
+    if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['user_id'])) {
+        $mysqli->query('SET @nu_actor = ' . (int)$_SESSION['user_id']);
+    }
+
     return $mysqli;
 }
 
