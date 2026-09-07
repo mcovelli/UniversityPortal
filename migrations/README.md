@@ -167,11 +167,7 @@ enrolments comes to exactly 40 on every one, so the counter was right and
 the sections were genuinely oversold. The floor trigger refuses to make
 them worse and lets each drop return a seat, so they recover on their own.
 
-## Two things left open
-
-**The override.** Every policy rule in 012 honours `SET @nu_override = 1`
-on the connection. Nothing sets it, so nothing bypasses anything today.
-Wiring it to the update-admin role is a deliberate decision, not a default.
+## One thing left open
 
 **312 students** have a `Student.MajorID` and no `StudentMajor` row. Their
 majors spread realistically across all ten departments, so it is real
@@ -186,3 +182,48 @@ installed, 34 behavioural tests pass (each rule rejects what it should and
 accepts what it should), all 63 application pages render with zero fatals
 and zero warnings, and a registration and a drop each move the seat count
 by exactly one.
+
+# 013: the two things 010–012 left open
+
+The override now has a source: `config.php`'s `get_db()` sets
+`SET @nu_override = 1` whenever `$_SESSION['admin_type'] === 'update'`, so
+an UpdateAdmin's writes bypass every policy rule from 012 plus the two new
+ones below. **This is a PHP change, not a migration — it's already live**,
+independent of whether 013 has been applied.
+
+`013_section_scheduling_rules.sql` closes the three constraints flagged in
+the table above but not built: no negative seats, no room double-booked in
+a timeslot, no faculty double-booked in a timeslot.
+
+```bash
+mysqldump -h 127.0.0.1 -u root --set-gtid-purged=OFF --single-transaction \
+  --routines --triggers --databases University > University_before_013.sql
+
+mysql -h 127.0.0.1 -u root University --table < migrations/013_section_scheduling_rules.sql
+```
+
+| Rule | Pre-existing violations | Shape |
+|---|---|---|
+| `AvailableSeats >= 0` | 41 sections | Repaired (floored to 0), then a real `CHECK` |
+| One section per room per timeslot per semester | 52 groups | Trigger — rejects a new clash, leaves the 52 |
+| One section per faculty per timeslot per semester | 131 groups | Trigger — rejects a new clash, leaves the 131 |
+
+The seat repair is not the same kind of move as leaving the room/faculty
+clashes alone. `AvailableSeats` is a live counter that 012 already proved
+self-corrects to the true capacity — flooring it to 0 doesn't rewrite
+anything, it's the value the seat-floor trigger already guarantees those
+rows reach. A room or faculty clash is a historical scheduling record with
+no way to tell, from the data, which of the two sections was the mistake —
+so like the 312 students above, it's left alone rather than guessed at.
+Both new triggers honour `@nu_override`.
+
+## Verified
+
+Applied to a clone of the live database on 2026-09-07. 33 triggers
+installed (29 + 4), the `CHECK` constraint added, 8 behavioural tests
+pass: a clashing insert and a clashing update are both rejected, both are
+allowed under `@nu_override`, an ordinary insert/update with no clash
+still succeeds, a negative-seat insert is rejected by the `CHECK` (the
+pre-existing floor trigger only covers `UPDATE`), and a normal seat
+decrement still works. Live database confirmed unchanged (29 triggers,
+41 negative sections) — 013 has not been applied there.

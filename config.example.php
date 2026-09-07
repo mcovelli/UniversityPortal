@@ -32,6 +32,15 @@ function get_db(): mysqli {
         die('<h2>Database connection failed.</h2>');
     }
     $mysqli->set_charset('utf8mb4');
+
+    /* An UpdateAdmin's writes bypass the policy triggers from migration 012
+       (deadlines, holds, prereqs, credit load, timeslot clashes, capacity) --
+       session_status() guards this because several AJAX endpoints (get_*.php)
+       call get_db() without ever starting a session. */
+    if (session_status() === PHP_SESSION_ACTIVE && ($_SESSION['admin_type'] ?? null) === 'update') {
+        $mysqli->query('SET @nu_override = 1');
+    }
+
     return $mysqli;
 }
 
