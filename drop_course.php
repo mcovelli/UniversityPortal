@@ -69,15 +69,10 @@ try {
 
     if ($drop->affected_rows > 0) {
 
-        // Give back seat only if truly dropped
-        $update = $mysqli->prepare("
-            UPDATE CourseSection
-            SET AvailableSeats = AvailableSeats + 1
-            WHERE CRN = ?
-        ");
-        $update->bind_param('i', $crn);
-        $update->execute();
-        $update->close();
+        /* The seat is returned by trg_SE_after_update_seats (migration 012),
+           in the same statement as the status change. The "+ 1" that used to
+           sit here would now return the seat twice, and it had no ceiling --
+           repeated drops could inflate a section past its real capacity. */
 
         $_SESSION['success_message'] = "Successfully dropped course CRN $crn.";
     } else {

@@ -109,3 +109,80 @@ To block deletion instead, switch the four constraints marked
 Applied to a clone of the live database on 2026-09-04: 89 foreign keys
 added, zero orphans across all 93 checked references, rollback returns to
 zero, and re-applying after rollback succeeds.
+
+---
+
+# 010–012: the rules the schema was missing
+
+The schema had one trigger (it blocks user deletes) and no rule anywhere
+for what a registration is allowed to be. These three add 28 more, in the
+order that lets each be applied without a data cleanup ahead of it.
+
+```bash
+# Back up first. DDL commits implicitly.
+mysqldump -h 127.0.0.1 -u root --set-gtid-purged=OFF --single-transaction \
+  --routines --triggers --databases University > University_before_010.sql
+
+mysql -h 127.0.0.1 -u root University --table < migrations/010_integrity_triggers.sql
+mysql -h 127.0.0.1 -u root University --table < migrations/011_studentmajor_authoritative.sql
+mysql -h 127.0.0.1 -u root University --table < migrations/012_registration_rules.sql
+```
+
+| File | Adds | Rejects existing rows? |
+|---|---|---|
+| `010` | Grade foreign key + 10 triggers: enrolment matches its section, course level matches the student, the Student/Undergraduate/Graduate hierarchy stays disjoint | No — every rule holds on all 31,056 rows today, and a guard aborts if that stops being true |
+| `011` | Recaches `Student.MajorID` from `StudentMajor` and adds 7 triggers to keep it there | Repairs 1,173 major caches and 140 empty minor caches |
+| `012` | The add/drop window, holds, prerequisites, credit load, timetable clashes, and seat accounting — 11 triggers | Yes. See below |
+
+## 010 and 011 change how three pages must be written
+
+`UpdateUsers.php` changed with them, and the order in its student block is
+now load-bearing:
+
+1. delete the subtype row being moved away from
+2. then change `Student.StudentType` — 010 rejects the reverse order
+3. then insert the new subtype row
+4. then rewrite `StudentMajor` / `StudentMinor`, which is what sets
+   `Student.MajorID` — 011 rejects writing that column directly
+
+`confirm_cart.php` and `drop_course.php` no longer touch `AvailableSeats`.
+Migration 012 moves that into triggers so the count changes in the same
+statement as the enrolment. **Leaving the PHP as it was charges two seats
+for one registration.**
+
+## 012 enforces rules the historical data breaks
+
+A trigger governs new rows only, so these survive and are not repaired:
+
+| Rule | Rows already breaking it |
+|---|---|
+| Prerequisites met | 13,464 |
+| Under the credit ceiling | 1,634 student-semesters |
+| No two sections in one timeslot | 1,256 students |
+| No hold on the account | 57 students |
+| Seats not below zero | 41 sections |
+
+The 41 negative sections are not corruption: `AvailableSeats` plus live
+enrolments comes to exactly 40 on every one, so the counter was right and
+the sections were genuinely oversold. The floor trigger refuses to make
+them worse and lets each drop return a seat, so they recover on their own.
+
+## Two things left open
+
+**The override.** Every policy rule in 012 honours `SET @nu_override = 1`
+on the connection. Nothing sets it, so nothing bypasses anything today.
+Wiring it to the update-admin role is a deliberate decision, not a default.
+
+**312 students** have a `Student.MajorID` and no `StudentMajor` row. Their
+majors spread realistically across all ten departments, so it is real
+information — but writing declarations for them means inventing 312
+declaration dates, 216 for students with no enrolment history to date
+from. Left as-is; `011` section 5 lists them.
+
+## Verified
+
+Applied to a clone of the live database on 2026-09-06. 29 triggers
+installed, 34 behavioural tests pass (each rule rejects what it should and
+accepts what it should), all 63 application pages render with zero fatals
+and zero warnings, and a registration and a drop each move the seat count
+by exactly one.

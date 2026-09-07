@@ -47,12 +47,6 @@ $insertEnroll = $mysqli->prepare("
         EnrollmentDate = VALUES(EnrollmentDate)
 ");
 
-$updateSeats = $mysqli->prepare("
-    UPDATE CourseSection 
-    SET AvailableSeats = AvailableSeats - 1 
-    WHERE CRN = ?
-");
-
 $checkPrior = $mysqli->prepare("
     SELECT 1
     FROM StudentEnrollment
@@ -151,10 +145,14 @@ foreach ($cart as $item) {
         $insertEnroll->bind_param('isiss', $userId, $semesterId, $crn, $courseId, $status);
         $insertEnroll->execute();
 
+        /* The seat count is no longer adjusted here. Migration 012 gives
+           StudentEnrollment an AFTER INSERT trigger that decrements it in
+           the same statement as the insert, which is what makes it safe:
+           this code read the count, decided a status, inserted and then
+           decremented as a separate statement, so two students registering
+           at the same moment could both be handed the last chair. Doing it
+           here as well would now charge two seats for one registration. */
         if ($status === 'ENROLLED') {
-            // decrement available seats
-            $updateSeats->bind_param('i', $crn);
-            $updateSeats->execute();
             $enrolled[] = $crn;
         } else {
             $waitlisted[] = $crn;
@@ -170,7 +168,6 @@ foreach ($cart as $item) {
 $check->close();
 $getCourse->close();
 $insertEnroll->close();
-$updateSeats->close();
 $checkPrior->close();
 $missingPrereq->close();
 unset($_SESSION['cart']);

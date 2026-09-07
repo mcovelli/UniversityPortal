@@ -179,23 +179,38 @@ if (isset($_POST['updateUser'])) {
         ----------------------- */
         if ($role === 'Student') {
 
-            // Update Student main table
+            /* The order below is load-bearing, and it is the reverse of what
+               this block used to do. Two rules from migrations 010 and 011
+               reject the old sequence outright:
+
+                 - Student.StudentType cannot move while the row for the old
+                   type still exists, so the DELETE comes first.
+                 - Student.MajorID follows StudentMajor rather than leading
+                   it, so the declarations are written last and the sync
+                   trigger sets the cached column. Writing MajorID here is
+                   what put the two records out of step for 1,152 students
+                   in the first place, so this no longer writes it at all. */
+
+            // 1. Drop the subtype row we are moving away from.
+            if ($_POST['StudentType'] === "Undergraduate") {
+                $mysqli->query("DELETE FROM Graduate WHERE StudentID = $uid");
+            } else {
+                $mysqli->query("DELETE FROM Undergraduate WHERE StudentID = $uid");
+            }
+
+            // 2. With that gone, the type can change.
             $q = $mysqli->prepare("
                 UPDATE Student
-                SET MajorID=?, MinorID=?, StudentType=?
+                SET StudentType=?
                 WHERE StudentID=?
             ");
-            $q->bind_param("iisi", $_POST['MajorID'], $_POST['MinorID'], $_POST['StudentType'], $uid);
+            $q->bind_param("si", $_POST['StudentType'], $uid);
             $q->execute();
             $q->close();
 
-            /* --- IF UNDERGRADUATE --- */
+            // 3. And the row for the new type can go in.
             if ($_POST['StudentType'] === "Undergraduate") {
 
-                // Delete graduate row if exists
-                $mysqli->query("DELETE FROM Graduate WHERE StudentID = $uid");
-
-                // Update Undergraduate
                 $q = $mysqli->prepare("
                     REPLACE INTO Undergraduate(StudentID, DeptID, UGStudentType)
                     VALUES (?, (SELECT DeptID FROM Major WHERE MajorID=?), ?)
@@ -206,10 +221,6 @@ if (isset($_POST['updateUser'])) {
 
             } else {
 
-                // Delete undergraduate row if exists
-                $mysqli->query("DELETE FROM Undergraduate WHERE StudentID = $uid");
-
-                // Update Graduate
                 $q = $mysqli->prepare("
                     REPLACE INTO Graduate(StudentID, DeptID, Year, GradStudentType, ProgramID)
                     VALUES (?, (SELECT DeptID FROM Program WHERE ProgramID=?), 1, ?, ?)
@@ -219,7 +230,9 @@ if (isset($_POST['updateUser'])) {
                 $q->close();
             }
 
-            // Reset StudentMajor
+            // 4. Declarations last. trg_StudentMajor_after_* and
+            //    trg_StudentMinor_after_* set Student.MajorID and MinorID
+            //    from these, so nothing here writes those columns.
             $mysqli->query("DELETE FROM StudentMajor WHERE StudentID = $uid");
             if (!empty($_POST['MajorID'])) {
                 $q = $mysqli->prepare("INSERT INTO StudentMajor(StudentID, MajorID, DateOfDeclaration) VALUES (?, ?, CURRENT_DATE)");
@@ -228,7 +241,6 @@ if (isset($_POST['updateUser'])) {
                 $q->close();
             }
 
-            // Reset StudentMinor
             $mysqli->query("DELETE FROM StudentMinor WHERE StudentID = $uid");
             if (!empty($_POST['MinorID'])) {
                 $q = $mysqli->prepare("INSERT INTO StudentMinor(StudentID, MinorID, DateOfDeclaration) VALUES (?, ?, CURRENT_DATE)");
